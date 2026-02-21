@@ -111,6 +111,67 @@ func TestStatusJSONSolvedState(t *testing.T) {
 	}
 }
 
+func TestReadRunManifest(t *testing.T) {
+	root := t.TempDir()
+	manifestJSON := `{
+		"goal": "Summarize the document",
+		"model": "claude-sonnet-4-6",
+		"max_depth": 3,
+		"status": "running",
+		"workspace": "/tmp/ws",
+		"started_at": "2026-02-21T12:00:00Z"
+	}`
+	os.WriteFile(filepath.Join(root, "run.json"), []byte(manifestJSON), 0o644)
+
+	manifest := ReadRunManifest(root)
+	if manifest == nil {
+		t.Fatal("expected manifest, got nil")
+	}
+	if manifest.Goal != "Summarize the document" {
+		t.Errorf("goal=%q, want 'Summarize the document'", manifest.Goal)
+	}
+	if manifest.Model != "claude-sonnet-4-6" {
+		t.Errorf("model=%q, want 'claude-sonnet-4-6'", manifest.Model)
+	}
+	if manifest.Status != "running" {
+		t.Errorf("status=%q, want 'running'", manifest.Status)
+	}
+	if manifest.MaxDepth != 3 {
+		t.Errorf("max_depth=%d, want 3", manifest.MaxDepth)
+	}
+}
+
+func TestReadRunManifestMissing(t *testing.T) {
+	root := t.TempDir()
+	manifest := ReadRunManifest(root)
+	if manifest != nil {
+		t.Error("expected nil for missing run.json")
+	}
+}
+
+func TestReadRunManifestCompleted(t *testing.T) {
+	root := t.TempDir()
+	manifestJSON := `{
+		"goal": "test",
+		"model": "m",
+		"max_depth": 1,
+		"status": "completed",
+		"total_cost_usd": 0.0523,
+		"total_calls": 7,
+		"started_at": "2026-02-21T12:00:00Z",
+		"completed_at": "2026-02-21T12:05:00Z"
+	}`
+	os.WriteFile(filepath.Join(root, "run.json"), []byte(manifestJSON), 0o644)
+
+	manifest := ReadRunManifest(root)
+	if manifest.TotalCostUSD != 0.0523 {
+		t.Errorf("total_cost_usd=%f, want 0.0523", manifest.TotalCostUSD)
+	}
+	if manifest.TotalCalls != 7 {
+		t.Errorf("total_calls=%d, want 7", manifest.TotalCalls)
+	}
+}
+
 func TestNodeState(t *testing.T) {
 	tests := []struct {
 		name          string

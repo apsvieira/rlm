@@ -197,6 +197,33 @@ func buildNode(path, name string, depth, callIndex int) (*Node, error) {
 	return node, nil
 }
 
+// RunManifest holds run-level metadata from run.json.
+type RunManifest struct {
+	Goal         string  `json:"goal"`
+	Model        string  `json:"model"`
+	MaxDepth     int     `json:"max_depth"`
+	Status       string  `json:"status"`
+	Workspace    string  `json:"workspace"`
+	StartedAt    string  `json:"started_at"`
+	CompletedAt  string  `json:"completed_at,omitempty"`
+	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
+	TotalCalls   int     `json:"total_calls,omitempty"`
+}
+
+// ReadRunManifest reads and parses run.json from the workspace root.
+// Returns nil if the file doesn't exist or can't be parsed.
+func ReadRunManifest(root string) *RunManifest {
+	data, err := os.ReadFile(filepath.Join(root, "run.json"))
+	if err != nil {
+		return nil
+	}
+	var m RunManifest
+	if json.Unmarshal(data, &m) != nil {
+		return nil
+	}
+	return &m
+}
+
 // WorkspaceStats holds summary stats for the whole workspace.
 type WorkspaceStats struct {
 	TotalNodes  int

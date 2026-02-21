@@ -47,6 +47,7 @@ type model struct {
 	detailFile    string
 	width         int
 	height        int
+	manifest      *RunManifest
 	err           error
 }
 
@@ -68,6 +69,7 @@ func (m *model) refresh() {
 	if m.cursor >= len(m.flat) {
 		m.cursor = max(0, len(m.flat)-1)
 	}
+	m.manifest = ReadRunManifest(m.workspacePath)
 	m.err = nil
 }
 
@@ -161,6 +163,21 @@ func (m model) View() string {
 	// Header
 	b.WriteString(titleStyle.Render(fmt.Sprintf("RLM Monitor — %s", m.workspacePath)))
 	b.WriteString("\n")
+
+	// Run manifest line (if run.json exists)
+	if m.manifest != nil {
+		modelShort := strings.TrimPrefix(m.manifest.Model, "claude-")
+		runLine := fmt.Sprintf("model: %s | max-depth: %d | status: %s",
+			modelShort, m.manifest.MaxDepth, m.manifest.Status)
+		if m.manifest.TotalCostUSD > 0 {
+			runLine += fmt.Sprintf(" | cost: $%.4f", m.manifest.TotalCostUSD)
+		}
+		if m.manifest.TotalCalls > 0 {
+			runLine += fmt.Sprintf(" | calls: %d", m.manifest.TotalCalls)
+		}
+		b.WriteString(dimStyle.Render(runLine))
+		b.WriteString("\n")
+	}
 
 	// Stats bar
 	active := m.stats.Working + m.stats.Decomposed

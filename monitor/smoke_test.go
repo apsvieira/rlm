@@ -133,6 +133,34 @@ func TestSmokeErrorState(t *testing.T) {
 	}
 }
 
+func TestSmokeRunManifestHeader(t *testing.T) {
+	root := setupSmokeWorkspace(t)
+
+	// Write run.json
+	os.WriteFile(filepath.Join(root, "run.json"), []byte(`{
+		"goal": "Summarize the document",
+		"model": "claude-sonnet-4-6",
+		"max_depth": 3,
+		"status": "running",
+		"started_at": "2026-02-21T12:00:00Z"
+	}`), 0o644)
+
+	m := initialModel(root)
+	m.width = 80
+	m.height = 24
+
+	view := m.View()
+	if !strings.Contains(view, "sonnet-4-6") {
+		t.Error("header should show model name")
+	}
+	if !strings.Contains(view, "max-depth: 3") {
+		t.Error("header should show max depth")
+	}
+	if !strings.Contains(view, "status: running") {
+		t.Error("header should show run status")
+	}
+}
+
 func TestSmokeProgressUpdate(t *testing.T) {
 	root := setupSmokeWorkspace(t)
 	m := initialModel(root)
