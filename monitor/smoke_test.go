@@ -161,6 +161,51 @@ func TestSmokeRunManifestHeader(t *testing.T) {
 	}
 }
 
+func TestSmokeCostAndTiming(t *testing.T) {
+	root := t.TempDir()
+
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte("ctx"), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "answer.txt"), []byte("answer"), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "status.json"), []byte(`{
+		"state": "solved",
+		"goal": "test goal",
+		"cost_usd": 0.0042,
+		"input_tokens": 1200,
+		"output_tokens": 450,
+		"started_at": "2026-02-21T12:00:00Z",
+		"completed_at": "2026-02-21T12:00:30Z"
+	}`), 0o644)
+
+	m := initialModel(root)
+	m.width = 100
+	m.height = 24
+
+	// Tree view should show cost
+	view := m.View()
+	if !strings.Contains(view, "$0.0042") {
+		t.Errorf("tree should show cost, got: %s", view)
+	}
+
+	// Detail view should show cost, tokens, and timing
+	m.showDetail = true
+	m.loadDetail("answer.txt")
+	detailView := m.View()
+	if !strings.Contains(detailView, "$0.0042") {
+		t.Error("detail should show cost")
+	}
+	if !strings.Contains(detailView, "1200") {
+		t.Error("detail should show input tokens")
+	}
+	if !strings.Contains(detailView, "450") {
+		t.Error("detail should show output tokens")
+	}
+	if !strings.Contains(detailView, "30s") {
+		t.Error("detail should show elapsed time")
+	}
+}
+
 func TestSmokeProgressUpdate(t *testing.T) {
 	root := setupSmokeWorkspace(t)
 	m := initialModel(root)

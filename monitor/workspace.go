@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 type NodeState int
@@ -283,6 +284,53 @@ func FormatSize(bytes int) string {
 		return fmt.Sprintf("%dB", bytes)
 	}
 	return fmt.Sprintf("%.1fk", float64(bytes)/1024)
+}
+
+// statusFloat extracts a float64 from StatusJSON, returning 0 if absent.
+func statusFloat(s map[string]interface{}, key string) float64 {
+	if s == nil {
+		return 0
+	}
+	if v, ok := s[key].(float64); ok {
+		return v
+	}
+	return 0
+}
+
+// statusString extracts a string from StatusJSON, returning "" if absent.
+func statusString(s map[string]interface{}, key string) string {
+	if s == nil {
+		return ""
+	}
+	if v, ok := s[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// FormatElapsed computes duration between two ISO timestamps and returns
+// a human-readable string like "30s", "2m30s", "1h5m". Returns "" if
+// either timestamp is missing or unparseable.
+func FormatElapsed(startedAt, completedAt string) string {
+	if startedAt == "" || completedAt == "" {
+		return ""
+	}
+	start, err := time.Parse(time.RFC3339, startedAt)
+	if err != nil {
+		return ""
+	}
+	end, err := time.Parse(time.RFC3339, completedAt)
+	if err != nil {
+		return ""
+	}
+	d := end.Sub(start)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 // TreePrefix returns the box-drawing prefix for a node in a flat list display.

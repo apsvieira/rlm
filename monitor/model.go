@@ -246,6 +246,12 @@ func (m model) renderTree() string {
 			sizeInfo += dimStyle.Render(fmt.Sprintf(" ans:%s", FormatSize(node.AnswerLen)))
 		}
 
+		// Cost from status.json
+		costInfo := ""
+		if cost := statusFloat(node.StatusJSON, "cost_usd"); cost > 0 {
+			costInfo = dimStyle.Render(fmt.Sprintf(" $%.4f", cost))
+		}
+
 		// Goal snippet (truncated)
 		goalSnip := ""
 		if node.Goal != "" {
@@ -256,7 +262,7 @@ func (m model) renderTree() string {
 			goalSnip = dimStyle.Render(fmt.Sprintf(" \"%s\"", g))
 		}
 
-		line := fmt.Sprintf(" %s%s  %s  %s%s", prefix, node.Name, stateStr, sizeInfo, goalSnip)
+		line := fmt.Sprintf(" %s%s  %s  %s%s%s", prefix, node.Name, stateStr, sizeInfo, costInfo, goalSnip)
 
 		if i == m.cursor {
 			line = selectedStyle.Render(line)
@@ -296,6 +302,30 @@ func (m model) renderDetail() string {
 	if node.Goal != "" {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("Goal: %s", node.Goal)))
 		b.WriteString("\n")
+	}
+
+	// Cost, tokens, timing from status.json
+	if node.StatusJSON != nil {
+		var metaParts []string
+		if cost := statusFloat(node.StatusJSON, "cost_usd"); cost > 0 {
+			metaParts = append(metaParts, fmt.Sprintf("cost: $%.4f", cost))
+		}
+		inTok := statusFloat(node.StatusJSON, "input_tokens")
+		outTok := statusFloat(node.StatusJSON, "output_tokens")
+		if inTok > 0 || outTok > 0 {
+			metaParts = append(metaParts, fmt.Sprintf("tokens: %d in / %d out", int(inTok), int(outTok)))
+		}
+		elapsed := FormatElapsed(
+			statusString(node.StatusJSON, "started_at"),
+			statusString(node.StatusJSON, "completed_at"),
+		)
+		if elapsed != "" {
+			metaParts = append(metaParts, fmt.Sprintf("elapsed: %s", elapsed))
+		}
+		if len(metaParts) > 0 {
+			b.WriteString(dimStyle.Render(strings.Join(metaParts, " | ")))
+			b.WriteString("\n")
+		}
 	}
 
 	b.WriteString(strings.Repeat("─", min(m.width, 72)))
