@@ -22,6 +22,7 @@ var (
 	decomStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))  // blue
 	solvedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))  // green
 	synthStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("177"))  // purple
+	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))  // red
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	detailLabel   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -115,6 +116,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showDetail && len(m.flat) > 0 {
 				m.loadDetail("subcalls.json")
 			}
+		case "e":
+			if m.showDetail && len(m.flat) > 0 {
+				m.loadDetail("error.txt")
+			}
 		case "r":
 			m.refresh()
 		}
@@ -164,6 +169,12 @@ func (m model) View() string {
 		"Nodes: %d total | %d active | %d done | max depth: %d",
 		m.stats.TotalNodes, active, done, m.stats.MaxDepth,
 	)
+	if m.stats.Errors > 0 {
+		statsLine += fmt.Sprintf(" | %d error", m.stats.Errors)
+		if m.stats.Errors > 1 {
+			statsLine += "s"
+		}
+	}
 	b.WriteString(statsStyle.Render(statsLine))
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("─", min(m.width, 72)))
@@ -183,7 +194,7 @@ func (m model) View() string {
 	// Help footer
 	b.WriteString("\n")
 	if m.showDetail {
-		b.WriteString(helpStyle.Render("[esc] back  [c] context  [a] answer  [s] subcalls  [q] quit"))
+		b.WriteString(helpStyle.Render("[esc] back  [c] context  [a] answer  [s] subcalls  [e] error  [q] quit"))
 	} else {
 		b.WriteString(helpStyle.Render("[j/k] navigate  [enter] detail  [r] refresh  [q] quit"))
 	}
@@ -208,6 +219,8 @@ func (m model) renderTree() string {
 			stateStr = solvedStyle.Render("✓ SOLVED")
 		case StateSynthesized:
 			stateStr = synthStyle.Render("✦ SYNTHESIZED")
+		case StateError:
+			stateStr = errorStyle.Render("✗ ERROR")
 		}
 
 		// Size info

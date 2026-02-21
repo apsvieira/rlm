@@ -96,6 +96,43 @@ func TestSmokeRender(t *testing.T) {
 	}
 }
 
+func TestSmokeErrorState(t *testing.T) {
+	root := t.TempDir()
+
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte("ctx"), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "status.json"), []byte(`{"state":"error","goal":"test goal"}`), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "error.txt"), []byte("Agent produced neither answer.txt nor subcalls.json"), 0o644)
+
+	m := initialModel(root)
+	m.width = 80
+	m.height = 24
+
+	view := m.View()
+
+	// Error state should render with icon and label
+	if !strings.Contains(view, "ERROR") {
+		t.Error("missing ERROR state label in tree view")
+	}
+
+	// Stats bar should show error count
+	if !strings.Contains(view, "1 error") {
+		t.Errorf("stats bar should show error count, got: %s", view)
+	}
+
+	// Detail view should support [e] for error.txt
+	m.showDetail = true
+	m.loadDetail("error.txt")
+	detailView := m.View()
+	if !strings.Contains(detailView, "Agent produced neither") {
+		t.Error("detail view should show error.txt content")
+	}
+	if !strings.Contains(detailView, "[e] error") {
+		t.Error("detail help should mention [e] error keybinding")
+	}
+}
+
 func TestSmokeProgressUpdate(t *testing.T) {
 	root := setupSmokeWorkspace(t)
 	m := initialModel(root)
