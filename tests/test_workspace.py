@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from rlm.workspace import Workspace
@@ -46,7 +47,6 @@ class TestWorkspaceCreation:
     def test_read_subcalls_from_file(self, tmp_path: Path):
         ws = Workspace(root=tmp_path / "rlm_ws")
         node = ws.create_node(depth=0, call_index=0)
-        import json
         subcalls = [
             {"goal": "summarize section 1", "context_file": "vars/chunk_0.txt"},
             {"goal": "summarize section 2", "context_file": "vars/chunk_1.txt"},
@@ -55,3 +55,34 @@ class TestWorkspaceCreation:
         result = node.read_subcalls()
         assert len(result) == 2
         assert result[0]["goal"] == "summarize section 1"
+
+    def test_nested_node_avoids_collision(self, tmp_path: Path):
+        """Issue 4: Two parents at depth 1 creating depth 2 children must not collide."""
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        parent_a = ws.create_node(depth=1, call_index=0, context="parent A")
+        parent_b = ws.create_node(depth=1, call_index=1, context="parent B")
+        child_a = ws.create_node(depth=2, call_index=0, context="child of A", parent=parent_a)
+        child_b = ws.create_node(depth=2, call_index=0, context="child of B", parent=parent_b)
+        assert child_a.path != child_b.path
+        assert (child_a.path / "context.txt").read_text() == "child of A"
+        assert (child_b.path / "context.txt").read_text() == "child of B"
+
+    def test_read_subcalls_malformed_json(self, tmp_path: Path):
+        """Issue 5: Malformed JSON in subcalls.json should return empty list."""
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0)
+        (node.path / "subcalls.json").write_text("not valid json {{{")
+        assert node.read_subcalls() == []
+
+    def test_read_subcalls_missing_goal_key(self, tmp_path: Path):
+        """Issue 5: Subcall entries without 'goal' key should be filtered out."""
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0)
+        subcalls = [
+            {"goal": "valid entry", "context_file": "vars/sub_0.txt"},
+            {"no_goal_key": "invalid entry"},
+        ]
+        (node.path / "subcalls.json").write_text(json.dumps(subcalls))
+        result = node.read_subcalls()
+        assert len(result) == 1
+        assert result[0]["goal"] == "valid entry"

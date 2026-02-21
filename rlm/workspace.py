@@ -37,9 +37,20 @@ class WorkspaceNode:
         return None
 
     def read_subcalls(self) -> list[dict[str, Any]]:
-        if self.subcalls_path.exists():
-            return json.loads(self.subcalls_path.read_text())
-        return []
+        if not self.subcalls_path.exists():
+            return []
+        try:
+            data = json.loads(self.subcalls_path.read_text())
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, list):
+            return []
+        # Validate each subcall has the required "goal" key
+        valid = []
+        for item in data:
+            if isinstance(item, dict) and "goal" in item:
+                valid.append(item)
+        return valid
 
 
 class Workspace:
@@ -47,6 +58,7 @@ class Workspace:
 
     def __init__(self, root: Path):
         self.root = root
+        self._node_counter = 0
 
     def create_node(
         self,
@@ -54,8 +66,15 @@ class Workspace:
         call_index: int,
         context: str | None = None,
         context_path: Path | None = None,
+        parent: WorkspaceNode | None = None,
     ) -> WorkspaceNode:
-        node_dir = self.root / f"d{depth}_c{call_index}"
+        base = parent.path if parent else self.root
+        node_dir = base / f"d{depth}_c{call_index}"
+        # Issue 4: Avoid collision — if directory already exists at this base,
+        # use the workspace-wide counter to generate a unique name.
+        if node_dir.exists():
+            self._node_counter += 1
+            node_dir = base / f"d{depth}_c{call_index}_{self._node_counter}"
         node_dir.mkdir(parents=True, exist_ok=True)
         (node_dir / "vars").mkdir(exist_ok=True)
 
