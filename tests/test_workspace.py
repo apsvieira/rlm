@@ -86,3 +86,47 @@ class TestWorkspaceCreation:
         result = node.read_subcalls()
         assert len(result) == 1
         assert result[0]["goal"] == "valid entry"
+
+
+class TestNodeStatus:
+    def test_write_status_creates_file(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.write_status(state="working", depth=0, call_index=0, goal="test goal")
+        status = json.loads((node.path / "status.json").read_text())
+        assert status["state"] == "working"
+        assert status["depth"] == 0
+        assert status["call_index"] == 0
+        assert status["goal"] == "test goal"
+        assert "started_at" in status
+
+    def test_write_status_preserves_existing_fields(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.write_status(state="working", depth=0, call_index=0, goal="test")
+        node.write_status(state="decomposed")
+        status = json.loads((node.path / "status.json").read_text())
+        assert status["state"] == "decomposed"
+        assert status["goal"] == "test"  # preserved from first write
+
+    def test_write_status_with_cost(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.write_status(
+            state="solved",
+            depth=0,
+            call_index=0,
+            goal="test",
+            cost_usd=0.0042,
+            input_tokens=1200,
+            output_tokens=450,
+        )
+        status = json.loads((node.path / "status.json").read_text())
+        assert status["cost_usd"] == 0.0042
+        assert status["input_tokens"] == 1200
+        assert status["output_tokens"] == 450
+
+    def test_read_status_missing_returns_empty_dict(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0)
+        assert node.read_status() == {}

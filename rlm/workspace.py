@@ -28,6 +28,10 @@ class WorkspaceNode:
         return self.path / "subcalls.json"
 
     @property
+    def status_path(self) -> Path:
+        return self.path / "status.json"
+
+    @property
     def vars_path(self) -> Path:
         return self.path / "vars"
 
@@ -35,6 +39,25 @@ class WorkspaceNode:
         if self.answer_path.exists():
             return self.answer_path.read_text()
         return None
+
+    def read_status(self) -> dict[str, Any]:
+        if not self.status_path.exists():
+            return {}
+        try:
+            return json.loads(self.status_path.read_text())
+        except json.JSONDecodeError:
+            return {}
+
+    def write_status(self, **fields: Any) -> None:
+        """Merge fields into status.json (creates if missing)."""
+        from datetime import datetime, timezone
+
+        existing = self.read_status()
+        # Auto-set started_at on first write
+        if not existing and "started_at" not in fields:
+            fields["started_at"] = datetime.now(timezone.utc).isoformat()
+        existing.update(fields)
+        self.status_path.write_text(json.dumps(existing, indent=2))
 
     def read_subcalls(self) -> list[dict[str, Any]]:
         if not self.subcalls_path.exists():
