@@ -172,6 +172,27 @@ func TestReadRunManifestCompleted(t *testing.T) {
 	}
 }
 
+func TestGoalFromStatusJSON(t *testing.T) {
+	root := t.TempDir()
+
+	// Root node with no parent — goal should come from status.json
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte("ctx"), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "status.json"), []byte(`{"state":"working","goal":"Summarize the document"}`), 0o644)
+
+	tree, err := ScanWorkspace(root)
+	if err != nil {
+		t.Fatalf("ScanWorkspace: %v", err)
+	}
+	if len(tree) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(tree))
+	}
+	if tree[0].Goal != "Summarize the document" {
+		t.Errorf("goal=%q, want 'Summarize the document'", tree[0].Goal)
+	}
+}
+
 func TestNodeState(t *testing.T) {
 	tests := []struct {
 		name          string

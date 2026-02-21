@@ -173,6 +173,13 @@ func buildNode(path, name string, depth, callIndex int) (*Node, error) {
 		}
 	}
 
+	// Use status.json goal as fallback when no parent assigns one
+	if node.Goal == "" {
+		if g := statusString(node.StatusJSON, "goal"); g != "" {
+			node.Goal = g
+		}
+	}
+
 	// Scan vars/
 	varsPath := filepath.Join(path, "vars")
 	if entries, err := os.ReadDir(varsPath); err == nil {
