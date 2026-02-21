@@ -196,8 +196,10 @@ async def rlm_call(
     # Check: did the agent request subcalls? (Issue 5: validated by read_subcalls)
     subcalls = node.read_subcalls()
     if not subcalls:
+        error_msg = "Agent produced neither answer.txt nor subcalls.json"
+        node.write_error(error_msg)
         return RLMResult(
-            answer="[RLM Error: Agent produced neither answer.txt nor subcalls.json]",
+            answer=f"[RLM Error: {error_msg}]",
             workspace_root=workspace.root,
             total_cost_usd=total_cost,
             total_calls=total_calls,
@@ -267,7 +269,9 @@ async def rlm_call(
             output_tokens=cur_status.get("output_tokens", 0) + synth_phase.output_tokens,
         )
     if answer is None:
-        answer = "[RLM Error: Synthesis agent did not write answer.txt]"
+        error_msg = "Synthesis agent did not write answer.txt"
+        node.write_error(error_msg)
+        answer = f"[RLM Error: {error_msg}]"
 
     return RLMResult(
         answer=answer,

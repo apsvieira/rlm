@@ -59,6 +59,17 @@ class WorkspaceNode:
         existing.update(fields)
         self.status_path.write_text(json.dumps(existing, indent=2))
 
+    @property
+    def error_path(self) -> Path:
+        return self.path / "error.txt"
+
+    def write_error(self, message: str) -> None:
+        """Write error.txt and update status.json to error state."""
+        from datetime import datetime, timezone
+
+        self.error_path.write_text(message)
+        self.write_status(state="error", completed_at=datetime.now(timezone.utc).isoformat())
+
     def read_subcalls(self) -> list[dict[str, Any]]:
         if not self.subcalls_path.exists():
             return []

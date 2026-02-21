@@ -130,3 +130,20 @@ class TestNodeStatus:
         ws = Workspace(root=tmp_path / "rlm_ws")
         node = ws.create_node(depth=0, call_index=0)
         assert node.read_status() == {}
+
+
+class TestNodeError:
+    def test_write_error_creates_file(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.write_error("Agent produced neither answer.txt nor subcalls.json")
+        assert (node.path / "error.txt").read_text() == "Agent produced neither answer.txt nor subcalls.json"
+
+    def test_write_error_updates_status(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.write_status(state="working", depth=0, call_index=0, goal="test")
+        node.write_error("something broke")
+        status = node.read_status()
+        assert status["state"] == "error"
+        assert "completed_at" in status
