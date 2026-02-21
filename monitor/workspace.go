@@ -17,6 +17,7 @@ const (
 	StateDecomposed                   // context.txt + subcalls.json
 	StateSolved                       // context.txt + answer.txt (no subcalls)
 	StateSynthesized                  // context.txt + subcalls.json + answer.txt
+	StateError                        // error.txt present or status.json says "error"
 )
 
 func (s NodeState) String() string {
@@ -29,23 +30,26 @@ func (s NodeState) String() string {
 		return "Solved"
 	case StateSynthesized:
 		return "Synthesized"
+	case StateError:
+		return "Error"
 	default:
 		return "Unknown"
 	}
 }
 
 type Node struct {
-	Name        string         // directory name, e.g. "d0_c0"
-	Path        string         // absolute path
+	Name        string                 // directory name, e.g. "d0_c0"
+	Path        string                 // absolute path
 	Depth       int
 	CallIndex   int
 	State       NodeState
-	Goal        string         // from parent's subcalls.json, if available
-	AnswerLen   int            // length of answer.txt in bytes, 0 if absent
-	ContextLen  int            // length of context.txt in bytes
-	VarsFiles   []string       // filenames in vars/
+	Goal        string                 // from parent's subcalls.json, if available
+	AnswerLen   int                    // length of answer.txt in bytes, 0 if absent
+	ContextLen  int                    // length of context.txt in bytes
+	VarsFiles   []string               // filenames in vars/
 	Children    []*Node
-	SubcallsRaw []SubcallEntry // parsed subcalls.json
+	SubcallsRaw []SubcallEntry         // parsed subcalls.json
+	StatusJSON  map[string]interface{} // parsed status.json, nil if absent
 }
 
 type SubcallEntry struct {
@@ -146,6 +150,28 @@ func buildNode(path, name string, depth, callIndex int) (*Node, error) {
 
 	node.State = inferState(hasContext, hasAnswer, hasSubcalls)
 
+	// Prefer status.json state over file-presence inference
+	if data, err := os.ReadFile(filepath.Join(path, "status.json")); err == nil {
+		var status map[string]interface{}
+		if json.Unmarshal(data, &status) == nil {
+			node.StatusJSON = status
+			if stateStr, ok := status["state"].(string); ok {
+				switch stateStr {
+				case "working":
+					node.State = StateWorking
+				case "decomposed":
+					node.State = StateDecomposed
+				case "solved":
+					node.State = StateSolved
+				case "synthesized":
+					node.State = StateSynthesized
+				case "error":
+					node.State = StateError
+				}
+			}
+		}
+	}
+
 	// Scan vars/
 	varsPath := filepath.Join(path, "vars")
 	if entries, err := os.ReadDir(varsPath); err == nil {
@@ -178,6 +204,7 @@ type WorkspaceStats struct {
 	Decomposed  int
 	Solved      int
 	Synthesized int
+	Errors      int
 	MaxDepth    int
 }
 
@@ -196,6 +223,8 @@ func ComputeStats(nodes []*Node) WorkspaceStats {
 				s.Solved++
 			case StateSynthesized:
 				s.Synthesized++
+			case StateError:
+				s.Errors++
 			}
 			if n.Depth > s.MaxDepth {
 				s.MaxDepth = n.Depth
