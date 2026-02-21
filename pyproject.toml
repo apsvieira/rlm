@@ -15,6 +15,10 @@ rlm = "rlm.main:cli"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
