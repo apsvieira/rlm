@@ -147,3 +147,31 @@ class TestNodeError:
         status = node.read_status()
         assert status["state"] == "error"
         assert "completed_at" in status
+
+
+class TestRunManifest:
+    def test_write_run_manifest(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        ws.write_run_manifest(
+            goal="Summarize the document",
+            model="claude-sonnet-4-6",
+            max_depth=3,
+            status="running",
+        )
+        manifest = json.loads((tmp_path / "rlm_ws" / "run.json").read_text())
+        assert manifest["goal"] == "Summarize the document"
+        assert manifest["model"] == "claude-sonnet-4-6"
+        assert manifest["max_depth"] == 3
+        assert manifest["status"] == "running"
+        assert "started_at" in manifest
+        assert manifest["workspace"] == str(tmp_path / "rlm_ws")
+
+    def test_update_run_manifest(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        ws.write_run_manifest(goal="test", model="m", max_depth=1, status="running")
+        ws.update_run_manifest(status="completed", total_cost_usd=0.05, total_calls=3)
+        manifest = json.loads((tmp_path / "rlm_ws" / "run.json").read_text())
+        assert manifest["status"] == "completed"
+        assert manifest["total_cost_usd"] == 0.05
+        assert manifest["total_calls"] == 3
+        assert "completed_at" in manifest

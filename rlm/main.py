@@ -48,6 +48,10 @@ def cli(
     workspace = Workspace(root=Path(workspace_path))
     config = RLMConfig(goal=goal, model=model, max_depth=max_depth)
 
+    workspace.write_run_manifest(
+        goal=goal, model=model, max_depth=max_depth, status="running",
+    )
+
     result = asyncio.run(
         rlm_call(
             workspace=workspace,
@@ -57,6 +61,12 @@ def cli(
             context=context_text,
             context_path=Path(context_path) if context_path else None,
         )
+    )
+
+    workspace.update_run_manifest(
+        status="completed",
+        total_cost_usd=result.total_cost_usd,
+        total_calls=result.total_calls,
     )
 
     click.echo(f"\n{'='*60}")

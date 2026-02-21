@@ -118,3 +118,29 @@ class Workspace:
             shutil.copy2(context_path, node_dir / "context.txt")
 
         return WorkspaceNode(path=node_dir)
+
+    def write_run_manifest(self, goal: str, model: str, max_depth: int, status: str) -> None:
+        """Write run.json at workspace root."""
+        from datetime import datetime, timezone
+
+        self.root.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "goal": goal,
+            "model": model,
+            "max_depth": max_depth,
+            "status": status,
+            "workspace": str(self.root),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        (self.root / "run.json").write_text(json.dumps(manifest, indent=2))
+
+    def update_run_manifest(self, **fields: Any) -> None:
+        """Merge fields into existing run.json."""
+        from datetime import datetime, timezone
+
+        manifest_path = self.root / "run.json"
+        existing = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+        if "status" in fields and fields["status"] in ("completed", "error"):
+            fields.setdefault("completed_at", datetime.now(timezone.utc).isoformat())
+        existing.update(fields)
+        manifest_path.write_text(json.dumps(existing, indent=2))
