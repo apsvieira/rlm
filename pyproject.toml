@@ -1,0 +1,22 @@
+[project]
+name = "rlm"
+version = "0.1.0"
+description = "Recursive Language Model using Claude Agent SDK"
+requires-python = ">=3.10"
+dependencies = [
+    "claude-agent-sdk",
+    "click>=8.0",
+]
+
+[project.scripts]
+rlm = "rlm.main:cli"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
