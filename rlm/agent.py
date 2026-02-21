@@ -41,6 +41,16 @@ class RLMConfig:
 
 
 @dataclass
+class PhaseResult:
+    """Result from a single agent phase."""
+
+    text: str | None
+    cost_usd: float
+    input_tokens: int
+    output_tokens: int
+
+
+@dataclass
 class RLMResult:
     """Result from an RLM run."""
 
@@ -57,17 +67,19 @@ async def run_agent_phase(
     model: str,
     tools: list[str],
     permission_mode: str,
-) -> tuple[str | None, float]:
+) -> PhaseResult:
     """Run a single agent phase (decompose or synthesize).
 
     Uses system_prompt for meta-instructions and prompt for the task-specific
     user message. The tools parameter controls which tools are available
     (Issue 1: uses 'tools' not 'allowed_tools').
 
-    Returns (result_text, cost_usd).
+    Returns PhaseResult with text, cost, and token usage.
     """
     last_text: str | None = None
     cost: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     # Unset CLAUDECODE to allow SDK subprocess to launch when running
     # inside a Claude Code session (e.g., during integration tests).
@@ -89,11 +101,19 @@ async def run_agent_phase(
                         last_text = block.text
             elif isinstance(message, ResultMessage):
                 cost = message.total_cost_usd or 0.0
+                usage = message.usage or {}
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
     finally:
         if saved_claudecode is not None:
             os.environ["CLAUDECODE"] = saved_claudecode
 
-    return last_text, cost
+    return PhaseResult(
+        text=last_text,
+        cost_usd=cost,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
 
 
 async def rlm_call(
@@ -136,11 +156,16 @@ async def rlm_call(
         max_depth=config.max_depth,
     )
 
+    from datetime import datetime, timezone
+
     total_cost = 0.0
     total_calls = 1
 
+    # Write initial status
+    node.write_status(state="working", depth=depth, call_index=call_index, goal=effective_goal)
+
     # Phase 1: Decompose or solve
-    _, cost = await run_agent_phase(
+    phase = await run_agent_phase(
         system_prompt=system_prompt,
         prompt=effective_goal,
         cwd=str(node.path),
@@ -148,11 +173,19 @@ async def rlm_call(
         tools=tools,
         permission_mode=config.permission_mode,
     )
-    total_cost += cost
+    total_cost += phase.cost_usd
+
+    # Update status with decompose phase cost
+    node.write_status(
+        cost_usd=phase.cost_usd,
+        input_tokens=phase.input_tokens,
+        output_tokens=phase.output_tokens,
+    )
 
     # Check: did the agent answer directly?
     answer = node.read_answer()
     if answer is not None:
+        node.write_status(state="solved", completed_at=datetime.now(timezone.utc).isoformat())
         return RLMResult(
             answer=answer,
             workspace_root=workspace.root,
@@ -169,6 +202,9 @@ async def rlm_call(
             total_cost_usd=total_cost,
             total_calls=total_calls,
         )
+
+    # Mark as decomposed
+    node.write_status(state="decomposed")
 
     # Phase 2: Execute subcalls recursively
     sub_answers: dict[str, str] = {}
@@ -209,7 +245,7 @@ async def rlm_call(
         sub_answers=sub_answers,
     )
 
-    _, synth_cost = await run_agent_phase(
+    synth_phase = await run_agent_phase(
         system_prompt=synth_system_prompt,
         prompt=f"Synthesize the sub-task results and write your answer to answer.txt. Original task: {effective_goal}",
         cwd=str(node.path),
@@ -217,10 +253,19 @@ async def rlm_call(
         tools=tools,
         permission_mode=config.permission_mode,
     )
-    total_cost += synth_cost
+    total_cost += synth_phase.cost_usd
     total_calls += 1
 
     answer = node.read_answer()
+    if answer is not None:
+        cur_status = node.read_status()
+        node.write_status(
+            state="synthesized",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            cost_usd=cur_status.get("cost_usd", 0) + synth_phase.cost_usd,
+            input_tokens=cur_status.get("input_tokens", 0) + synth_phase.input_tokens,
+            output_tokens=cur_status.get("output_tokens", 0) + synth_phase.output_tokens,
+        )
     if answer is None:
         answer = "[RLM Error: Synthesis agent did not write answer.txt]"
 

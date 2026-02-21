@@ -1,5 +1,4 @@
 
-
 from rlm.agent import get_tools_for_depth, RLMConfig
 
 
@@ -33,3 +32,37 @@ class TestRLMConfig:
         config = RLMConfig(goal="test", model="claude-haiku-4-5-20251001", max_depth=1)
         assert config.model == "claude-haiku-4-5-20251001"
         assert config.max_depth == 1
+
+
+class TestStatusWriting:
+    """Test that rlm_call writes status.json at key points.
+
+    These are workspace-level tests that verify status file contents
+    after simulating what rlm_call would write. We don't call rlm_call
+    directly (that requires a running agent) — we test the write_status
+    integration with the workspace.
+    """
+
+    def test_initial_status_on_node_creation(self, tmp_path):
+        from rlm.workspace import Workspace
+
+        ws = Workspace(root=tmp_path / "ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.write_status(state="working", depth=0, call_index=0, goal="test goal")
+        status = node.read_status()
+        assert status["state"] == "working"
+        assert "started_at" in status
+
+    def test_status_transitions(self, tmp_path):
+        from rlm.workspace import Workspace
+
+        ws = Workspace(root=tmp_path / "ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        # working -> decomposed -> synthesized
+        node.write_status(state="working", depth=0, call_index=0, goal="test")
+        node.write_status(state="decomposed")
+        assert node.read_status()["state"] == "decomposed"
+        node.write_status(state="synthesized", completed_at="2026-02-21T00:00:00Z")
+        status = node.read_status()
+        assert status["state"] == "synthesized"
+        assert status["completed_at"] == "2026-02-21T00:00:00Z"
