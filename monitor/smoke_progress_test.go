@@ -1,13 +1,23 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestSmokeAfterProgress(t *testing.T) {
-	// After adding answer.txt to d1_c1 and d0_c0, re-scan
-	m := initialModel("/tmp/rlm-test")
+	root := setupSmokeWorkspace(t)
+
+	// Add answer.txt to both remaining nodes to simulate full completion
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.WriteFile(filepath.Join(d0c0, "d1_c1", "answer.txt"), []byte("Summary of section 2: it discusses Y"), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "answer.txt"), []byte("Combined summary: section 1 covers X, section 2 covers Y"), 0o644)
+
+	m := initialModel(root)
+	m.width = 80
+	m.height = 24
 
 	// d1_c1 should now be Solved
 	var d1c1 *Node
@@ -25,18 +35,18 @@ func TestSmokeAfterProgress(t *testing.T) {
 	}
 
 	// d0_c0 should now be Synthesized (has subcalls.json + answer.txt)
-	var d0c0 *Node
+	var d0c0Node *Node
 	for _, n := range m.flat {
 		if n.Name == "d0_c0" {
-			d0c0 = n
+			d0c0Node = n
 			break
 		}
 	}
-	if d0c0 == nil {
+	if d0c0Node == nil {
 		t.Fatal("d0_c0 not found")
 	}
-	if d0c0.State != StateSynthesized {
-		t.Errorf("d0_c0 should be Synthesized, got %v", d0c0.State)
+	if d0c0Node.State != StateSynthesized {
+		t.Errorf("d0_c0 should be Synthesized, got %v", d0c0Node.State)
 	}
 
 	// Stats should show all done

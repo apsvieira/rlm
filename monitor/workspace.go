@@ -71,6 +71,9 @@ func inferState(hasContext, hasAnswer, hasSubcalls bool) NodeState {
 
 // ScanWorkspace walks the workspace root and returns top-level nodes (typically one: d0_c0).
 func ScanWorkspace(root string) ([]*Node, error) {
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return nil, nil // Not an error — workspace not created yet
+	}
 	return scanDir(root)
 }
 
