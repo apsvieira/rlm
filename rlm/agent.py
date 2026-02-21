@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -68,22 +69,29 @@ async def run_agent_phase(
     last_text: str | None = None
     cost: float = 0.0
 
-    async for message in query(
-        prompt=prompt,
-        options=ClaudeAgentOptions(
-            system_prompt=system_prompt,
-            tools=tools,
-            permission_mode=permission_mode,
-            model=model,
-            cwd=cwd,
-        ),
-    ):
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    last_text = block.text
-        elif isinstance(message, ResultMessage):
-            cost = message.total_cost_usd or 0.0
+    # Unset CLAUDECODE to allow SDK subprocess to launch when running
+    # inside a Claude Code session (e.g., during integration tests).
+    saved_claudecode = os.environ.pop("CLAUDECODE", None)
+    try:
+        async for message in query(
+            prompt=prompt,
+            options=ClaudeAgentOptions(
+                system_prompt=system_prompt,
+                tools=tools,
+                permission_mode=permission_mode,
+                model=model,
+                cwd=cwd,
+            ),
+        ):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        last_text = block.text
+            elif isinstance(message, ResultMessage):
+                cost = message.total_cost_usd or 0.0
+    finally:
+        if saved_claudecode is not None:
+            os.environ["CLAUDECODE"] = saved_claudecode
 
     return last_text, cost
 
