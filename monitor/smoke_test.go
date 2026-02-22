@@ -240,3 +240,26 @@ func TestSmokeProgressUpdate(t *testing.T) {
 	}
 	t.Fatal("d1_c1 not found after refresh")
 }
+
+func TestTruncationMessageShowsCorrectCount(t *testing.T) {
+	root := t.TempDir()
+
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte(strings.Repeat("line\n", 100)), 0o644)
+
+	m := initialModel(root)
+	m.width = 80
+	m.height = 24 // maxLines = max(24-12, 5) = 12
+	m.showDetail = true
+	m.loadDetail("context.txt")
+
+	view := m.View()
+	// Should show 88 more lines (100 - 12), NOT "0 more lines"
+	if strings.Contains(view, "(0 more lines)") {
+		t.Error("truncation message should not show 0 more lines")
+	}
+	if !strings.Contains(view, "more lines)") {
+		t.Error("should show truncation message for long content")
+	}
+}

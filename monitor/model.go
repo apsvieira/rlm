@@ -122,6 +122,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showDetail && len(m.flat) > 0 {
 				m.loadDetail("error.txt")
 			}
+		case "l":
+			if m.showDetail && len(m.flat) > 0 {
+				m.loadEventLog()
+			}
 		case "r":
 			m.refresh()
 		}
@@ -151,6 +155,19 @@ func (m *model) loadDetail(filename string) {
 		m.detailContent = string(data)
 	}
 	m.detailFile = filename
+}
+
+func (m *model) loadEventLog() {
+	if m.cursor >= len(m.flat) {
+		return
+	}
+	node := m.flat[m.cursor]
+	if len(node.Events) == 0 {
+		m.detailContent = "(no events)"
+	} else {
+		m.detailContent = FormatEventLog(node.Events)
+	}
+	m.detailFile = "events.jsonl"
 }
 
 func (m model) View() string {
@@ -211,7 +228,7 @@ func (m model) View() string {
 	// Help footer
 	b.WriteString("\n")
 	if m.showDetail {
-		b.WriteString(helpStyle.Render("[esc] back  [c] context  [a] answer  [s] subcalls  [e] error  [q] quit"))
+		b.WriteString(helpStyle.Render("[esc] back  [c] context  [a] answer  [s] subcalls  [e] error  [l] log  [q] quit"))
 	} else {
 		b.WriteString(helpStyle.Render("[j/k] navigate  [enter] detail  [r] refresh  [q] quit"))
 	}
@@ -252,6 +269,12 @@ func (m model) renderTree() string {
 			costInfo = dimStyle.Render(fmt.Sprintf(" $%.4f", cost))
 		}
 
+		// Tool use count from events
+		toolInfo := ""
+		if tc := ToolUseCount(node); tc > 0 {
+			toolInfo = dimStyle.Render(fmt.Sprintf(" tools:%d", tc))
+		}
+
 		// Goal snippet (truncated)
 		goalSnip := ""
 		if node.Goal != "" {
@@ -262,7 +285,7 @@ func (m model) renderTree() string {
 			goalSnip = dimStyle.Render(fmt.Sprintf(" \"%s\"", g))
 		}
 
-		line := fmt.Sprintf(" %s%s  %s  %s%s%s", prefix, node.Name, stateStr, sizeInfo, costInfo, goalSnip)
+		line := fmt.Sprintf(" %s%s  %s  %s%s%s%s", prefix, node.Name, stateStr, sizeInfo, costInfo, toolInfo, goalSnip)
 
 		if i == m.cursor {
 			line = selectedStyle.Render(line)
@@ -337,8 +360,9 @@ func (m model) renderDetail() string {
 	lines := strings.Split(m.detailContent, "\n")
 	maxLines := max(m.height-12, 5)
 	if len(lines) > maxLines {
+		total := len(lines)
 		lines = lines[:maxLines]
-		lines = append(lines, dimStyle.Render(fmt.Sprintf("... (%d more lines)", len(lines)-maxLines)))
+		lines = append(lines, dimStyle.Render(fmt.Sprintf("... (%d more lines)", total-maxLines)))
 	}
 	b.WriteString(strings.Join(lines, "\n"))
 	b.WriteString("\n")
