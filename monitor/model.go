@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -48,6 +49,8 @@ type model struct {
 	width         int
 	height        int
 	manifest      *RunManifest
+	viewport      viewport.Model
+	viewportReady bool
 	err           error
 }
 
@@ -85,6 +88,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "up", "k":
 			if m.showDetail {
+				m.viewport, _ = m.viewport.Update(msg)
 				break
 			}
 			if m.cursor > 0 {
@@ -92,10 +96,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "down", "j":
 			if m.showDetail {
+				m.viewport, _ = m.viewport.Update(msg)
 				break
 			}
 			if m.cursor < len(m.flat)-1 {
 				m.cursor++
+			}
+		case "pgup", "pgdown", "home", "end":
+			if m.showDetail {
+				m.viewport, _ = m.viewport.Update(msg)
 			}
 		case "enter":
 			if len(m.flat) > 0 {
@@ -137,6 +146,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		headerHeight := 8
+		footerHeight := 2
+		viewportHeight := max(m.height-headerHeight-footerHeight, 5)
+		if !m.viewportReady {
+			m.viewport = viewport.New(min(m.width, 72), viewportHeight)
+			m.viewportReady = true
+		} else {
+			m.viewport.Width = min(m.width, 72)
+			m.viewport.Height = viewportHeight
+		}
 	}
 
 	return m, nil
@@ -155,6 +174,7 @@ func (m *model) loadDetail(filename string) {
 		m.detailContent = string(data)
 	}
 	m.detailFile = filename
+	m.syncViewport()
 }
 
 func (m *model) loadEventLog() {
@@ -168,6 +188,7 @@ func (m *model) loadEventLog() {
 		m.detailContent = FormatEventLog(node.Events)
 	}
 	m.detailFile = "events.jsonl"
+	m.syncViewport()
 }
 
 func (m model) View() string {
@@ -228,7 +249,7 @@ func (m model) View() string {
 	// Help footer
 	b.WriteString("\n")
 	if m.showDetail {
-		b.WriteString(helpStyle.Render("[esc] back  [c] context  [a] answer  [s] subcalls  [e] error  [l] log  [q] quit"))
+		b.WriteString(helpStyle.Render("[↑/↓] scroll  [esc] back  [c] context  [a] answer  [s] subcalls  [e] error  [l] log  [q] quit"))
 	} else {
 		b.WriteString(helpStyle.Render("[j/k] navigate  [enter] detail  [r] refresh  [q] quit"))
 	}
@@ -263,9 +284,14 @@ func (m model) renderTree() string {
 			sizeInfo += dimStyle.Render(fmt.Sprintf(" ans:%s", FormatSize(node.AnswerLen)))
 		}
 
-		// Cost from status.json
+		// Cost + tokens: prefer live events data, fall back to status.json
 		costInfo := ""
-		if cost := statusFloat(node.StatusJSON, "cost_usd"); cost > 0 {
+		tokenInfo := ""
+		inTok, outTok, liveCost := LiveTokens(node)
+		if inTok > 0 || outTok > 0 {
+			costInfo = dimStyle.Render(fmt.Sprintf(" $%.4f", liveCost))
+			tokenInfo = dimStyle.Render(fmt.Sprintf(" %s↑%s↓", FormatSize(inTok), FormatSize(outTok)))
+		} else if cost := statusFloat(node.StatusJSON, "cost_usd"); cost > 0 {
 			costInfo = dimStyle.Render(fmt.Sprintf(" $%.4f", cost))
 		}
 
@@ -285,7 +311,7 @@ func (m model) renderTree() string {
 			goalSnip = dimStyle.Render(fmt.Sprintf(" \"%s\"", g))
 		}
 
-		line := fmt.Sprintf(" %s%s  %s  %s%s%s%s", prefix, node.Name, stateStr, sizeInfo, costInfo, toolInfo, goalSnip)
+		line := fmt.Sprintf(" %s%s  %s  %s%s%s%s%s", prefix, node.Name, stateStr, sizeInfo, costInfo, tokenInfo, toolInfo, goalSnip)
 
 		if i == m.cursor {
 			line = selectedStyle.Render(line)
@@ -356,16 +382,54 @@ func (m model) renderDetail() string {
 	b.WriteString(detailLabel.Render(fmt.Sprintf("── %s ──", m.detailFile)))
 	b.WriteString("\n")
 
-	// Truncate content to fit screen
-	lines := strings.Split(m.detailContent, "\n")
-	maxLines := max(m.height-12, 5)
-	if len(lines) > maxLines {
-		total := len(lines)
-		lines = lines[:maxLines]
-		lines = append(lines, dimStyle.Render(fmt.Sprintf("... (%d more lines)", total-maxLines)))
-	}
-	b.WriteString(strings.Join(lines, "\n"))
+	b.WriteString(m.viewport.View())
+	b.WriteString("\n")
+	pct := m.viewport.ScrollPercent()
+	scrollInfo := fmt.Sprintf(" %d%% ", int(pct*100))
+	b.WriteString(dimStyle.Render(scrollInfo))
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+// wrapText hard-wraps text to fit within the given width.
+func wrapText(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+	var result strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		for len(line) > width {
+			result.WriteString(line[:width])
+			result.WriteByte('\n')
+			line = line[width:]
+		}
+		result.WriteString(line)
+		result.WriteByte('\n')
+	}
+	s := result.String()
+	if len(s) > 0 && s[len(s)-1] == '\n' {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func (m *model) syncViewport() {
+	headerHeight := 8
+	footerHeight := 2
+	viewportHeight := max(m.height-headerHeight-footerHeight, 5)
+	contentWidth := min(m.width, 72)
+	if contentWidth <= 0 {
+		contentWidth = 72
+	}
+	if !m.viewportReady {
+		m.viewport = viewport.New(contentWidth, viewportHeight)
+		m.viewportReady = true
+	} else {
+		m.viewport.Width = contentWidth
+		m.viewport.Height = viewportHeight
+	}
+	wrapped := wrapText(m.detailContent, contentWidth)
+	m.viewport.SetContent(wrapped)
+	m.viewport.GotoTop()
 }

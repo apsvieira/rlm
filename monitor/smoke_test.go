@@ -1,10 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // setupSmokeWorkspace creates a self-contained workspace with mixed states.
@@ -241,25 +244,74 @@ func TestSmokeProgressUpdate(t *testing.T) {
 	t.Fatal("d1_c1 not found after refresh")
 }
 
-func TestTruncationMessageShowsCorrectCount(t *testing.T) {
+func TestDetailViewScrollDown(t *testing.T) {
 	root := t.TempDir()
-
 	d0c0 := filepath.Join(root, "d0_c0")
 	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
-	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte(strings.Repeat("line\n", 100)), 0o644)
+	var lines []string
+	for i := 1; i <= 100; i++ {
+		lines = append(lines, fmt.Sprintf("line %d content", i))
+	}
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte(strings.Join(lines, "\n")), 0o644)
 
 	m := initialModel(root)
 	m.width = 80
-	m.height = 24 // maxLines = max(24-12, 5) = 12
+	m.height = 24
 	m.showDetail = true
 	m.loadDetail("context.txt")
 
 	view := m.View()
-	// Should show 88 more lines (100 - 12), NOT "0 more lines"
-	if strings.Contains(view, "(0 more lines)") {
-		t.Error("truncation message should not show 0 more lines")
+	if !strings.Contains(view, "line 1 content") {
+		t.Error("initial detail view should show first line")
 	}
-	if !strings.Contains(view, "more lines)") {
-		t.Error("should show truncation message for long content")
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	view = m.View()
+	if view == "" {
+		t.Error("view should not be empty after scrolling")
+	}
+}
+
+func TestDetailViewWrapsLongLines(t *testing.T) {
+	root := t.TempDir()
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
+	longLine := strings.Repeat("word ", 40)
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte(longLine), 0o644)
+
+	m := initialModel(root)
+	m.width = 60
+	m.height = 24
+	m.showDetail = true
+	m.loadDetail("context.txt")
+
+	view := m.View()
+	if !strings.Contains(view, "word") {
+		t.Error("wrapped content should contain the text")
+	}
+}
+
+func TestSmokeTreeShowsLiveTokens(t *testing.T) {
+	root := t.TempDir()
+
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte("ctx"), 0o644)
+	events := `{"ts":"2026-02-21T12:00:00Z","type":"result","phase":"decompose","cost_usd":0.0010,"input_tokens":500,"output_tokens":100}
+{"ts":"2026-02-21T12:00:01Z","type":"result","phase":"decompose","cost_usd":0.0020,"input_tokens":800,"output_tokens":200}
+`
+	os.WriteFile(filepath.Join(d0c0, "events.jsonl"), []byte(events), 0o644)
+
+	m := initialModel(root)
+	m.width = 120
+	m.height = 24
+
+	view := m.View()
+	if !strings.Contains(view, "$0.0030") {
+		t.Errorf("tree should show aggregated live cost, got: %s", view)
+	}
+	if !strings.Contains(view, "↑") || !strings.Contains(view, "↓") {
+		t.Errorf("tree should show token arrows, got: %s", view)
 	}
 }

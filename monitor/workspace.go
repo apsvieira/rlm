@@ -38,6 +38,26 @@ func (s NodeState) String() string {
 	}
 }
 
+// EventEntry represents a single event from events.jsonl.
+type EventEntry struct {
+	Ts            string                 `json:"ts"`
+	Type          string                 `json:"type"`
+	Phase         string                 `json:"phase,omitempty"`
+	Name          string                 `json:"name,omitempty"`           // tool_use
+	Input         map[string]interface{} `json:"input,omitempty"`          // tool_use (truncated)
+	IsError       *bool                  `json:"is_error,omitempty"`       // tool_result
+	ToolUseID     string                 `json:"tool_use_id,omitempty"`    // tool_result
+	CostUSD       float64                `json:"cost_usd,omitempty"`       // result
+	InputTokens   int                    `json:"input_tokens,omitempty"`   // result
+	OutputTokens  int                    `json:"output_tokens,omitempty"`  // result
+	DurationMs    *float64               `json:"duration_ms,omitempty"`    // result
+	NumTurns      *int                   `json:"num_turns,omitempty"`      // result
+	Preview       string                 `json:"preview,omitempty"`        // text
+	Length        int                    `json:"length,omitempty"`         // text, tool_result content_length
+	ContentLength int                    `json:"content_length,omitempty"` // tool_result
+	Subtype       string                 `json:"subtype,omitempty"`        // system
+}
+
 type Node struct {
 	Name        string                 // directory name, e.g. "d0_c0"
 	Path        string                 // absolute path
@@ -51,6 +71,7 @@ type Node struct {
 	Children    []*Node
 	SubcallsRaw []SubcallEntry         // parsed subcalls.json
 	StatusJSON  map[string]interface{} // parsed status.json, nil if absent
+	Events      []EventEntry           // parsed events.jsonl
 }
 
 type SubcallEntry struct {
@@ -177,6 +198,20 @@ func buildNode(path, name string, depth, callIndex int) (*Node, error) {
 	if node.Goal == "" {
 		if g := statusString(node.StatusJSON, "goal"); g != "" {
 			node.Goal = g
+		}
+	}
+
+	// Parse events.jsonl
+	if evData, err := os.ReadFile(filepath.Join(path, "events.jsonl")); err == nil {
+		for _, line := range strings.Split(string(evData), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			var ev EventEntry
+			if json.Unmarshal([]byte(line), &ev) == nil {
+				node.Events = append(node.Events, ev)
+			}
 		}
 	}
 
@@ -338,6 +373,97 @@ func FormatElapsed(startedAt, completedAt string) string {
 		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+}
+
+// LiveTokens aggregates token counts and cost from all result events.
+// This provides a live running total even before status.json is finalized.
+func LiveTokens(node *Node) (inputTokens, outputTokens int, costUSD float64) {
+	for _, ev := range node.Events {
+		if ev.Type == "result" {
+			inputTokens += ev.InputTokens
+			outputTokens += ev.OutputTokens
+			costUSD += ev.CostUSD
+		}
+	}
+	return
+}
+
+// ToolUseCount returns the number of tool_use events for a node.
+func ToolUseCount(node *Node) int {
+	count := 0
+	for _, ev := range node.Events {
+		if ev.Type == "tool_use" {
+			count++
+		}
+	}
+	return count
+}
+
+// FormatEventLog formats events into a readable activity feed.
+func FormatEventLog(events []EventEntry) string {
+	var b strings.Builder
+	for _, ev := range events {
+		// Extract time portion from ISO timestamp
+		ts := ev.Ts
+		if len(ts) >= 19 {
+			// Extract HH:MM:SS from ISO format
+			ts = ts[11:19]
+		}
+
+		phase := ev.Phase
+		if phase == "" {
+			phase = "—"
+		}
+
+		switch ev.Type {
+		case "tool_use":
+			inputStr := ""
+			if ev.Input != nil {
+				parts := make([]string, 0, len(ev.Input))
+				for k, v := range ev.Input {
+					vs := fmt.Sprintf("%v", v)
+					if len(vs) > 60 {
+						vs = vs[:57] + "..."
+					}
+					parts = append(parts, fmt.Sprintf("%s: %q", k, vs))
+				}
+				inputStr = " {" + strings.Join(parts, ", ") + "}"
+			}
+			fmt.Fprintf(&b, "[%s] %s | tool_use: %s%s\n", ts, phase, ev.Name, inputStr)
+		case "tool_result":
+			status := "ok"
+			if ev.IsError != nil && *ev.IsError {
+				status = "ERROR"
+			}
+			size := FormatSize(ev.ContentLength)
+			fmt.Fprintf(&b, "[%s] %s | tool_result: %s (%s)\n", ts, phase, status, size)
+		case "text":
+			preview := ev.Preview
+			if len(preview) > 80 {
+				preview = preview[:77] + "..."
+			}
+			fmt.Fprintf(&b, "[%s] %s | text: (%d chars) %q\n", ts, phase, ev.Length, preview)
+		case "result":
+			durStr := ""
+			if ev.DurationMs != nil {
+				dur := *ev.DurationMs
+				if dur >= 1000 {
+					durStr = fmt.Sprintf(" | %.1fs", dur/1000)
+				} else {
+					durStr = fmt.Sprintf(" | %.0fms", dur)
+				}
+			}
+			fmt.Fprintf(&b, "[%s] %s | result: $%.4f | %s in / %s out%s\n",
+				ts, phase, ev.CostUSD,
+				FormatSize(ev.InputTokens), FormatSize(ev.OutputTokens),
+				durStr)
+		case "system":
+			fmt.Fprintf(&b, "[%s] %s | system: %s\n", ts, phase, ev.Subtype)
+		default:
+			fmt.Fprintf(&b, "[%s] %s | %s\n", ts, phase, ev.Type)
+		}
+	}
+	return b.String()
 }
 
 // TreePrefix returns the box-drawing prefix for a node in a flat list display.
