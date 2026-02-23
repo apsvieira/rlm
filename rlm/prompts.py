@@ -33,9 +33,9 @@ def build_decompose_prompt(
         f"You are at depth {current_depth} of {max_depth}.",
         "",
         "## Instructions",
-        "1. Read `context.txt` to understand your briefing",
-        "2. Explore the files and directories referenced in the briefing — the briefing points you at source material, it is not the complete data",
-        "3. Use Glob, Grep, Read, and Bash to discover what you need",
+        "1. If `context.txt` exists in your workspace, read it — it contains pointers to relevant files/directories and any context the caller already discovered",
+        "2. Explore files and directories to understand the task — use Glob, Grep, Read, and Bash to discover what you need",
+        "3. The briefing (if present) points you at source material; it is not the complete data",
     ]
 
     if at_max_depth:

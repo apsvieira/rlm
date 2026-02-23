@@ -5,44 +5,46 @@ description: Use when the user wants to process large contexts recursively, deco
 
 # RLM — Recursive Language Model
 
-Invoke the RLM Python entrypoint to recursively process a task using file-based context.
+Launch a recursive agent that explores, decomposes, and solves tasks autonomously.
+
+## Key principle
+
+RLM agents have full file exploration tools (Read, Glob, Grep, Bash, Write, Edit). They discover and navigate files themselves. **Do not pre-explore the codebase** — pass the goal and any known pointers directly. The RLM agent (or its sub-agents) will do the exploration.
 
 ## Usage
 
-Run via Bash (works from any directory):
-
 ```bash
+# Goal only — agent explores from scratch
+uv run --project /home/apsv/source/toy/rlm rlm \
+  --goal "<the task description>"
+
+# With a brief context file of pointers (not a data dump)
 uv run --project /home/apsv/source/toy/rlm rlm \
   --context <path-to-context-file> \
-  --goal "<the task description>" \
-  [--model claude-sonnet-4-6] \
-  [--max-depth 3] \
-  [--workspace <path>]
-```
+  --goal "<the task description>"
 
-Or with inline context:
-
-```bash
+# With inline context
 uv run --project /home/apsv/source/toy/rlm rlm \
-  --context-text "<inline text>" \
+  --context-text "<inline pointers and constraints>" \
   --goal "<the task>"
-```
 
-Or piped:
-
-```bash
-cat large_document.txt | uv run --project /home/apsv/source/toy/rlm rlm \
+# Piped input
+cat document.txt | uv run --project /home/apsv/source/toy/rlm rlm \
   --goal "<the task>"
 ```
 
 ## Parameters
 
-- `--context PATH`: Path to context file
-- `--context-text TEXT`: Inline context string
-- `--goal TEXT`: The task (required)
-- `--model MODEL`: Model to use (default: claude-sonnet-4-6)
-- `--max-depth N`: Max recursion depth (default: 3). Use 0 for no recursion.
-- `--workspace PATH`: Workspace dir (default: rlm_workspace/<timestamp>)
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--goal TEXT` | *(required)* | The task for the agent to accomplish |
+| `--context PATH` | — | Path to a context file (optional) |
+| `--context-text TEXT` | — | Inline context string (optional) |
+| `--model MODEL` | `claude-sonnet-4-6` | Model to use |
+| `--max-depth N` | `3` | Max recursion depth (0 = no decomposition) |
+| `--workspace PATH` | `rlm_workspace/<timestamp>` | Workspace directory |
+
+Context is optional. When omitted, the agent starts with just the goal and explores from there.
 
 ## When to use
 
@@ -52,87 +54,50 @@ cat large_document.txt | uv run --project /home/apsv/source/toy/rlm rlm \
 - Multi-section analysis where each section needs independent processing
 - Codebase exploration tasks where the agent should discover and navigate files itself
 
-## Preparing the context file
+## How to call it
 
-The context file is a **briefing document** that tells the RLM agent what to accomplish and where to look. The agent has full file exploration tools (Read, Glob, Grep, Bash, Write, Edit) and can read any file on the filesystem — so the context file should **point the agent at source material**, not try to inline everything.
+1. **Put the task in `--goal`.** This is the primary instruction to the agent.
 
-### What the context file should contain
+2. **Optionally provide context** — but only what you already know. Do not explore first to build context. Good context includes:
+   - Specific file paths or directories the user mentioned
+   - Error messages or stack traces from the conversation
+   - Constraints (e.g., "don't modify X", "must be backwards-compatible")
 
-The context file is a **briefing**, not a data dump. It tells the agent what to do and where to look:
+3. **Choose `--max-depth`** based on task complexity:
 
-- **Goal**: What the caller wants accomplished
-- **Pointers**: Paths to relevant files, directories, and line ranges the agent should explore
-- **Discovered context**: Anything the caller already knows — error messages, stack traces, prior findings — that saves the agent from rediscovering it
-- **Constraints**: Boundaries like "don't modify X" or "must be backwards-compatible"
+   | Task complexity | `--max-depth` | Example |
+   |----------------|---------------|---------|
+   | Simple / focused | `0` | "Summarize this file" |
+   | Multi-part | `1` | "Write docs for these 3 modules" |
+   | Cross-cutting | `2` | "Analyse this codebase's architecture" |
+   | Large-scale | `3` | "Review and refactor the entire test suite" |
 
-When it's useful, you can still inline small amounts of content (a config snippet, an error trace, a key function). Use your judgment: inline what saves the agent time, point at everything else.
+4. **Run and let the agent work.** It will explore, decide whether to decompose, and produce results.
 
-### Briefing format
+### Context file format (when used)
+
+A short briefing — pointers, not a data dump:
 
 ```text
-=== GOAL ===
-[What the caller wants accomplished]
-
 === RELEVANT FILES AND DIRECTORIES ===
-- src/auth/ — authentication module, likely where the bug lives
-- tests/test_auth.py — existing tests for auth
-- config/settings.py:45-60 — relevant configuration section
+- src/auth/ — authentication module
+- tests/test_auth.py — existing tests
+- config/settings.py:45-60 — relevant config
 
 === WHAT I ALREADY KNOW ===
-[Caller's discovered context: error messages, stack traces, prior findings]
+The login endpoint returns 403 for valid tokens since commit abc123.
 
 === CONSTRAINTS ===
-[Any boundaries: don't modify X, must be backwards-compatible, etc.]
+Don't modify the token format. Must remain backwards-compatible.
 ```
-
-### What NOT to put in the context file
-
-- Instructions to the agent (those go in `--goal`)
-- Prompts or questions (those go in `--goal`)
-- Massive inlined file dumps when a path reference would suffice
-- Raw `find` output without explanation of what's relevant
-
-### Task complexity guidelines
-
-| Task complexity | Recommended `--max-depth` | Strategy |
-|----------------|--------------------------|----------|
-| Simple, focused | 0 (no recursion) | Agent explores and solves directly |
-| Multi-part task | 1 | One level of decomposition into independent sub-tasks |
-| Cross-cutting analysis | 2 | Two levels; point at distinct directories or subsystems |
-| Large-scale exploration | 3 | Full recursion; each sub-task gets its own file pointers |
-
-### How the RLM decides to recurse
-
-Internally, each RLM agent autonomously decides whether to:
-- **Solve directly** (Option A): Write `answer.txt` immediately — chosen when the task is simple enough to handle in one pass
-- **Decompose** (Option B): Write sub-task contexts to `vars/sub_N_context.txt` and a `subcalls.json` specifying sub-goals — chosen when the task has distinct independent subtasks
-
-The agent is biased toward direct solving: "Choose Option A unless decomposition clearly improves the result." At max depth, decomposition is disabled entirely — the agent must solve directly.
-
-After sub-tasks complete, the parent agent enters **synthesis mode**: it receives all sub-answers and combines them into a coherent final answer, optionally re-reading the original `context.txt` and any referenced source files.
-
-### Decomposition strategies (from the RLM literature)
-
-The RLM paradigm (Zhang, Kraska & Khattab, 2025) documents four emergent strategies that agents use:
-
-1. **Peeking**: Inspect the first N characters/lines to understand structure before deciding how to proceed
-2. **Grepping**: Pattern/regex-based filtering to narrow the search space before recursive calls
-3. **Partition + Map**: Chunk context into segments, launch recursive calls on each, then aggregate — ideal for semantic mapping tasks (e.g., "analyze each component")
-4. **Summarization**: Extract and condense information subsets for the outer agent's decision-making
-
-You don't need to tell the agent which strategy to use — it decides autonomously. But structuring your briefing with clear file pointers and section boundaries makes Partition + Map particularly effective.
 
 ## How it works
 
-The RLM agent:
-1. Reads the briefing from `context.txt` in its workspace
-2. Explores referenced files and directories using its tools (Read, Glob, Grep, Bash)
-3. Decides whether to answer directly or decompose into sub-tasks
-4. If decomposing: writes sub-task briefings to files, specifies sub-goals
-5. Python orchestrator runs sub-agents recursively
-6. Results are synthesized into a final answer
-
-Output goes to stdout. The workspace directory contains all intermediate files for inspection.
+1. Agent reads its briefing (if any) and explores referenced files
+2. Decides: solve directly (write `answer.txt`) or decompose (write `subcalls.json`)
+3. If decomposing: orchestrator runs child agents recursively
+4. After children finish: parent synthesizes results into final `answer.txt`
+5. Recursion bounded by `--max-depth`; at max depth, agent must solve directly
 
 ## Monitoring
 

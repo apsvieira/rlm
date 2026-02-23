@@ -39,8 +39,6 @@ def cli(
         # Try reading from stdin
         if not sys.stdin.isatty():
             context_text = sys.stdin.read()
-        else:
-            raise click.UsageError("Provide --context, --context-text, or pipe input via stdin.")
 
     if workspace_path is None:
         workspace_path = f"rlm_workspace/{int(time.time())}"
