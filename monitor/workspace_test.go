@@ -353,12 +353,70 @@ func TestFormatEventLog(t *testing.T) {
 	}
 }
 
+func TestOutputFilesDiscovery(t *testing.T) {
+	root := t.TempDir()
+
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
+	// Framework files
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte("ctx"), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "answer.txt"), []byte("ans"), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "status.json"), []byte(`{"state":"solved"}`), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "events.jsonl"), []byte(""), 0o644)
+	// Agent output files
+	os.WriteFile(filepath.Join(d0c0, "report.md"), []byte("# Report"), 0o644)
+	os.WriteFile(filepath.Join(d0c0, "data.json"), []byte(`{"key":"value"}`), 0o644)
+
+	tree, err := ScanWorkspace(root)
+	if err != nil {
+		t.Fatalf("ScanWorkspace: %v", err)
+	}
+	if len(tree) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(tree))
+	}
+
+	node := tree[0]
+	if len(node.OutputFiles) != 2 {
+		t.Fatalf("expected 2 output files, got %d", len(node.OutputFiles))
+	}
+
+	// Sorted alphabetically
+	if node.OutputFiles[0].Name != "data.json" {
+		t.Errorf("output[0] name=%q, want 'data.json'", node.OutputFiles[0].Name)
+	}
+	if node.OutputFiles[1].Name != "report.md" {
+		t.Errorf("output[1] name=%q, want 'report.md'", node.OutputFiles[1].Name)
+	}
+	if node.OutputFiles[1].Size != len("# Report") {
+		t.Errorf("output[1] size=%d, want %d", node.OutputFiles[1].Size, len("# Report"))
+	}
+	if !filepath.IsAbs(node.OutputFiles[0].Path) || !strings.HasSuffix(node.OutputFiles[0].Path, "data.json") {
+		t.Errorf("output[0] path=%q, expected absolute path ending in data.json", node.OutputFiles[0].Path)
+	}
+}
+
+func TestOutputFilesEmpty(t *testing.T) {
+	root := t.TempDir()
+
+	d0c0 := filepath.Join(root, "d0_c0")
+	os.MkdirAll(filepath.Join(d0c0, "vars"), 0o755)
+	os.WriteFile(filepath.Join(d0c0, "context.txt"), []byte("ctx"), 0o644)
+
+	tree, err := ScanWorkspace(root)
+	if err != nil {
+		t.Fatalf("ScanWorkspace: %v", err)
+	}
+	if len(tree[0].OutputFiles) != 0 {
+		t.Errorf("expected 0 output files, got %d", len(tree[0].OutputFiles))
+	}
+}
+
 func TestNodeState(t *testing.T) {
 	tests := []struct {
 		name          string
 		hasContext    bool
-		hasAnswer    bool
-		hasSubcalls  bool
+		hasAnswer     bool
+		hasSubcalls   bool
 		expectedState NodeState
 	}{
 		{"working", true, false, false, StateWorking},

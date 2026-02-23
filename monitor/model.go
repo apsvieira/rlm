@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -19,11 +19,11 @@ var (
 	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99"))
 	statsStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	selectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("236")).Bold(true)
-	workingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))  // orange
-	decomStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("111"))  // blue
-	solvedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("114"))  // green
-	synthStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("177"))  // purple
-	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))  // red
+	workingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // orange
+	decomStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("111")) // blue
+	solvedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("114")) // green
+	synthStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("177")) // purple
+	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("196")) // red
 	dimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	detailLabel   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("99"))
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
@@ -135,6 +135,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showDetail && len(m.flat) > 0 {
 				m.loadEventLog()
 			}
+		case "f":
+			if m.showDetail && len(m.flat) > 0 {
+				m.loadOutputFiles()
+			}
 		case "r":
 			m.refresh()
 		}
@@ -149,11 +153,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		headerHeight := 8
 		footerHeight := 2
 		viewportHeight := max(m.height-headerHeight-footerHeight, 5)
+		w := m.contentWidth()
 		if !m.viewportReady {
-			m.viewport = viewport.New(min(m.width, 72), viewportHeight)
+			m.viewport = viewport.New(w, viewportHeight)
 			m.viewportReady = true
 		} else {
-			m.viewport.Width = min(m.width, 72)
+			m.viewport.Width = w
 			m.viewport.Height = viewportHeight
 		}
 	}
@@ -188,6 +193,25 @@ func (m *model) loadEventLog() {
 		m.detailContent = FormatEventLog(node.Events)
 	}
 	m.detailFile = "events.jsonl"
+	m.syncViewport()
+}
+
+func (m *model) loadOutputFiles() {
+	if m.cursor >= len(m.flat) {
+		return
+	}
+	node := m.flat[m.cursor]
+	if len(node.OutputFiles) == 0 {
+		m.detailContent = "(no output files)"
+	} else {
+		var b strings.Builder
+		fmt.Fprintf(&b, "Output files (%d):\n\n", len(node.OutputFiles))
+		for _, of := range node.OutputFiles {
+			fmt.Fprintf(&b, "  %s  (%s)\n", of.Path, FormatSize(of.Size))
+		}
+		m.detailContent = b.String()
+	}
+	m.detailFile = "output files"
 	m.syncViewport()
 }
 
@@ -232,7 +256,7 @@ func (m model) View() string {
 	}
 	b.WriteString(statsStyle.Render(statsLine))
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", min(m.width, 72)))
+	b.WriteString(strings.Repeat("─", m.contentWidth()))
 	b.WriteString("\n")
 
 	if len(m.flat) == 0 {
@@ -249,7 +273,7 @@ func (m model) View() string {
 	// Help footer
 	b.WriteString("\n")
 	if m.showDetail {
-		b.WriteString(helpStyle.Render("[↑/↓] scroll  [esc] back  [c] context  [a] answer  [s] subcalls  [e] error  [l] log  [q] quit"))
+		b.WriteString(helpStyle.Render("[↑/↓] scroll  [esc] back  [c] context  [a] answer  [s] subcalls  [e] error  [l] log  [f] files  [q] quit"))
 	} else {
 		b.WriteString(helpStyle.Render("[j/k] navigate  [enter] detail  [r] refresh  [q] quit"))
 	}
@@ -301,6 +325,12 @@ func (m model) renderTree() string {
 			toolInfo = dimStyle.Render(fmt.Sprintf(" tools:%d", tc))
 		}
 
+		// Output files count
+		filesInfo := ""
+		if len(node.OutputFiles) > 0 {
+			filesInfo = dimStyle.Render(fmt.Sprintf(" files:%d", len(node.OutputFiles)))
+		}
+
 		// Goal snippet (truncated)
 		goalSnip := ""
 		if node.Goal != "" {
@@ -311,7 +341,7 @@ func (m model) renderTree() string {
 			goalSnip = dimStyle.Render(fmt.Sprintf(" \"%s\"", g))
 		}
 
-		line := fmt.Sprintf(" %s%s  %s  %s%s%s%s%s", prefix, node.Name, stateStr, sizeInfo, costInfo, tokenInfo, toolInfo, goalSnip)
+		line := fmt.Sprintf(" %s%s  %s  %s%s%s%s%s%s", prefix, node.Name, stateStr, sizeInfo, costInfo, tokenInfo, toolInfo, filesInfo, goalSnip)
 
 		if i == m.cursor {
 			line = selectedStyle.Render(line)
@@ -348,6 +378,15 @@ func (m model) renderDetail() string {
 	b.WriteString(dimStyle.Render("Files: " + strings.Join(files, ", ")))
 	b.WriteString("\n")
 
+	if len(node.OutputFiles) > 0 {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("Output files (%d):", len(node.OutputFiles))))
+		b.WriteString("\n")
+		for _, of := range node.OutputFiles {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  %s  (%s)", of.Path, FormatSize(of.Size))))
+			b.WriteString("\n")
+		}
+	}
+
 	if node.Goal != "" {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("Goal: %s", node.Goal)))
 		b.WriteString("\n")
@@ -377,7 +416,7 @@ func (m model) renderDetail() string {
 		}
 	}
 
-	b.WriteString(strings.Repeat("─", min(m.width, 72)))
+	b.WriteString(strings.Repeat("─", m.contentWidth()))
 	b.WriteString("\n")
 	b.WriteString(detailLabel.Render(fmt.Sprintf("── %s ──", m.detailFile)))
 	b.WriteString("\n")
@@ -414,22 +453,28 @@ func wrapText(text string, width int) string {
 	return s
 }
 
+// contentWidth returns the usable content width, using the detected
+// terminal width or falling back to 80 if not yet known.
+func (m model) contentWidth() int {
+	if m.width > 0 {
+		return m.width
+	}
+	return 80
+}
+
 func (m *model) syncViewport() {
 	headerHeight := 8
 	footerHeight := 2
 	viewportHeight := max(m.height-headerHeight-footerHeight, 5)
-	contentWidth := min(m.width, 72)
-	if contentWidth <= 0 {
-		contentWidth = 72
-	}
+	w := m.contentWidth()
 	if !m.viewportReady {
-		m.viewport = viewport.New(contentWidth, viewportHeight)
+		m.viewport = viewport.New(w, viewportHeight)
 		m.viewportReady = true
 	} else {
-		m.viewport.Width = contentWidth
+		m.viewport.Width = w
 		m.viewport.Height = viewportHeight
 	}
-	wrapped := wrapText(m.detailContent, contentWidth)
+	wrapped := wrapText(m.detailContent, w)
 	m.viewport.SetContent(wrapped)
 	m.viewport.GotoTop()
 }

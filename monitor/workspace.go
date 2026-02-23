@@ -59,24 +59,42 @@ type EventEntry struct {
 }
 
 type Node struct {
-	Name        string                 // directory name, e.g. "d0_c0"
-	Path        string                 // absolute path
+	Name        string // directory name, e.g. "d0_c0"
+	Path        string // absolute path
 	Depth       int
 	CallIndex   int
 	State       NodeState
-	Goal        string                 // from parent's subcalls.json, if available
-	AnswerLen   int                    // length of answer.txt in bytes, 0 if absent
-	ContextLen  int                    // length of context.txt in bytes
-	VarsFiles   []string               // filenames in vars/
+	Goal        string       // from parent's subcalls.json, if available
+	AnswerLen   int          // length of answer.txt in bytes, 0 if absent
+	ContextLen  int          // length of context.txt in bytes
+	VarsFiles   []string     // filenames in vars/
+	OutputFiles []OutputFile // non-framework files (agent artifacts)
 	Children    []*Node
 	SubcallsRaw []SubcallEntry         // parsed subcalls.json
 	StatusJSON  map[string]interface{} // parsed status.json, nil if absent
 	Events      []EventEntry           // parsed events.jsonl
 }
 
+// OutputFile represents a non-framework file produced by an agent.
+type OutputFile struct {
+	Name string
+	Path string
+	Size int
+}
+
 type SubcallEntry struct {
 	Goal        string `json:"goal"`
 	ContextFile string `json:"context_file,omitempty"`
+}
+
+// frameworkFiles lists files managed by the RLM framework (not agent output).
+var frameworkFiles = map[string]bool{
+	"answer.txt":    true,
+	"context.txt":   true,
+	"subcalls.json": true,
+	"status.json":   true,
+	"events.jsonl":  true,
+	"error.txt":     true,
 }
 
 // Regex matches d<depth>_c<index> with optional _<counter> suffix.
@@ -119,8 +137,8 @@ func scanDir(dir string) ([]*Node, error) {
 			continue
 		}
 		var depth, callIdx int
-		fmt.Sscanf(matches[1], "%d", &depth)
-		fmt.Sscanf(matches[2], "%d", &callIdx)
+		_, _ = fmt.Sscanf(matches[1], "%d", &depth)
+		_, _ = fmt.Sscanf(matches[2], "%d", &callIdx)
 
 		nodePath := filepath.Join(dir, e.Name())
 		node, err := buildNode(nodePath, e.Name(), depth, callIdx)
@@ -223,6 +241,27 @@ func buildNode(path, name string, depth, callIndex int) (*Node, error) {
 				node.VarsFiles = append(node.VarsFiles, e.Name())
 			}
 		}
+	}
+
+	// Scan for output files (non-framework, non-directory files)
+	if dirEntries, err := os.ReadDir(path); err == nil {
+		for _, e := range dirEntries {
+			if e.IsDir() || frameworkFiles[e.Name()] {
+				continue
+			}
+			info, err := e.Info()
+			if err != nil {
+				continue
+			}
+			node.OutputFiles = append(node.OutputFiles, OutputFile{
+				Name: e.Name(),
+				Path: filepath.Join(path, e.Name()),
+				Size: int(info.Size()),
+			})
+		}
+		sort.Slice(node.OutputFiles, func(i, j int) bool {
+			return node.OutputFiles[i].Name < node.OutputFiles[j].Name
+		})
 	}
 
 	// Recurse into child node directories
