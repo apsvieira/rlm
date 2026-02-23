@@ -20,34 +20,39 @@ def build_decompose_prompt(
     parts = [
         "You are an RLM (Recursive Language Model) agent.",
         "",
+        "## Tools",
+        "You have access to: Read, Write, Edit, Bash, Glob, Grep.",
+        "Use them freely to explore files, search codebases, and run commands.",
+        "",
         "## Workspace",
         f"Your workspace directory is: {workspace_path}",
-        "- `context.txt` contains the input you should process",
+        "- `context.txt` is your **briefing** — it contains the goal, pointers to relevant files/directories, and any context the caller already discovered",
         "- `vars/` is your scratch space for intermediate files",
         "",
         "## Depth",
         f"You are at depth {current_depth} of {max_depth}.",
         "",
         "## Instructions",
-        "1. Read `context.txt` to understand your input",
-        "2. Explore the context as needed (grep, read sections, etc.)",
+        "1. Read `context.txt` to understand your briefing",
+        "2. Explore the files and directories referenced in the briefing — the briefing points you at source material, it is not the complete data",
+        "3. Use Glob, Grep, Read, and Bash to discover what you need",
     ]
 
     if at_max_depth:
         parts.extend([
-            "3. Process the task directly — you cannot delegate further",
-            "4. Write your complete answer to `answer.txt` in your workspace",
+            "4. Process the task directly — you cannot delegate further",
+            "5. Write your answer to `answer.txt` in your workspace",
         ])
     else:
         parts.extend([
-            "3. Decide: can you solve this directly, or should you decompose?",
+            "4. Decide: can you solve this directly, or should you decompose?",
             "",
             "### Option A: Solve directly",
-            "Write your complete answer to `answer.txt` in your workspace.",
+            "Write your answer to `answer.txt` in your workspace.",
             "",
             "### Option B: Decompose into sub-tasks",
             "If the task benefits from decomposition:",
-            "1. Write each sub-task's context to `vars/sub_N_context.txt`",
+            "1. Write each sub-task's briefing to `vars/sub_N_context.txt` — include file pointers and relevant discovered context, not massive inlined content",
             "2. Write a `subcalls.json` file in your workspace with this format:",
             '   ```json',
             '   [',
@@ -59,6 +64,28 @@ def build_decompose_prompt(
             "",
             "Choose Option A unless decomposition clearly improves the result.",
         ])
+
+    parts.extend([
+        "",
+        "## Answer format",
+        "When writing `answer.txt`, include:",
+        "- What you found (key findings, data, analysis)",
+        "- What actions you took (files modified, commands run), if any",
+        "- Current state (what changed, what the caller should know)",
+        "",
+        "### Output files",
+        "If you created any files (reports, parsed data, scripts, etc.), list them at the end of your answer under an `## Output files` heading:",
+        "- Use the **full absolute path** for each file",
+        "- Briefly describe what each file contains",
+        "- Note when the caller should read it (e.g., \"read for full analysis\", \"run to regenerate data\")",
+        "",
+        "Example:",
+        "```",
+        "## Output files",
+        f"- `{workspace_path}/vars/parsed_data.json` — structured extraction of all records; read for programmatic access",
+        f"- `{workspace_path}/vars/summary_report.md` — human-readable analysis; read for full findings",
+        "```",
+    ])
 
     if caller_prompt:
         parts.extend([
@@ -85,6 +112,10 @@ def build_synthesize_prompt(
     parts = [
         "You are an RLM (Recursive Language Model) agent in synthesis mode.",
         "",
+        "## Tools",
+        "You have access to: Read, Write, Edit, Bash, Glob, Grep.",
+        "You can re-read any source files referenced in your original briefing — you are not limited to the sub-answers below.",
+        "",
         "## Workspace",
         f"Your workspace directory is: {workspace_path}",
         "",
@@ -103,9 +134,11 @@ def build_synthesize_prompt(
 
     parts.extend([
         "## Instructions",
-        "1. You may also read `context.txt` for the original input",
-        "2. Synthesize the sub-task results into a coherent final answer",
-        "3. Write your complete answer to `answer.txt` in your workspace",
+        "1. Review the sub-task results above",
+        "2. You may also read `context.txt` for the original briefing and re-read any source files it references",
+        "3. Synthesize a coherent final answer covering: findings, actions taken, and current state",
+        "4. If sub-tasks list output files, aggregate them into a consolidated `## Output files` section in your answer — preserve the absolute paths from sub-tasks",
+        "5. Write your complete answer to `answer.txt` in your workspace",
         "",
         "## Original task",
         goal,
