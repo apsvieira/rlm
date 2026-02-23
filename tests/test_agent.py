@@ -1,5 +1,8 @@
 
-from rlm.agent import get_tools_for_depth, RLMConfig
+
+
+
+from rlm.agent import RLMConfig, get_tools_for_depth
 
 
 class TestToolSelection:
@@ -66,3 +69,53 @@ class TestStatusWriting:
         status = node.read_status()
         assert status["state"] == "synthesized"
         assert status["completed_at"] == "2026-02-21T00:00:00Z"
+
+
+class TestRunAgentPhaseSignature:
+    """Test that run_agent_phase accepts node and phase_label parameters."""
+
+    def test_accepts_node_and_phase_label_params(self):
+        import inspect
+
+        from rlm.agent import run_agent_phase
+
+        sig = inspect.signature(run_agent_phase)
+        params = list(sig.parameters.keys())
+        assert "node" in params
+        assert "phase_label" in params
+
+    def test_node_defaults_to_none(self):
+        import inspect
+
+        from rlm.agent import run_agent_phase
+
+        sig = inspect.signature(run_agent_phase)
+        assert sig.parameters["node"].default is None
+
+    def test_phase_label_defaults_to_none(self):
+        import inspect
+
+        from rlm.agent import run_agent_phase
+
+        sig = inspect.signature(run_agent_phase)
+        assert sig.parameters["phase_label"].default is None
+
+
+class TestRLMResultOutputFiles:
+    def test_output_files_default_empty(self):
+        from pathlib import Path
+
+        from rlm.agent import RLMResult
+
+        result = RLMResult(answer="test", workspace_root=Path("/tmp"))
+        assert result.output_files == []
+
+    def test_output_files_with_values(self):
+        from pathlib import Path
+
+        from rlm.agent import RLMResult
+
+        files = [Path("/tmp/report.md"), Path("/tmp/data.json")]
+        result = RLMResult(answer="test", workspace_root=Path("/tmp"), output_files=files)
+        assert len(result.output_files) == 2
+        assert result.output_files[0] == Path("/tmp/report.md")

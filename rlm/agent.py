@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from claude_agent_sdk import (
-    ClaudeAgentOptions,
     AssistantMessage,
+    ClaudeAgentOptions,
     ResultMessage,
+    SystemMessage,
     TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
     query,
 )
 
@@ -58,6 +61,32 @@ class RLMResult:
     workspace_root: Path
     total_cost_usd: float = 0.0
     total_calls: int = 0
+    output_files: list[Path] = field(default_factory=list)
+
+
+def _truncate_input(input_val: dict | str | None, max_len: int = 200) -> dict | str | None:
+    """Truncate tool input values over max_len chars for logging."""
+    if isinstance(input_val, dict):
+        result = {}
+        for k, v in input_val.items():
+            sv = str(v)
+            if len(sv) > max_len:
+                result[k] = sv[:max_len] + "..."
+            else:
+                result[k] = v
+        return result
+    if isinstance(input_val, str) and len(input_val) > max_len:
+        return input_val[:max_len] + "..."
+    return input_val
+
+
+def _log_event(node: WorkspaceNode | None, phase_label: str | None, event: dict) -> None:
+    """Log an event to the node's events.jsonl if node is provided."""
+    if node is None:
+        return
+    if phase_label:
+        event["phase"] = phase_label
+    node.append_event(event)
 
 
 async def run_agent_phase(
@@ -67,6 +96,8 @@ async def run_agent_phase(
     model: str,
     tools: list[str],
     permission_mode: str,
+    node: WorkspaceNode | None = None,
+    phase_label: str | None = None,
 ) -> PhaseResult:
     """Run a single agent phase (decompose or synthesize).
 
@@ -97,13 +128,44 @@ async def run_agent_phase(
         ):
             if isinstance(message, AssistantMessage):
                 for block in message.content:
-                    if isinstance(block, TextBlock):
+                    if isinstance(block, ToolUseBlock):
+                        _log_event(node, phase_label, {
+                            "type": "tool_use",
+                            "name": block.name,
+                            "input": _truncate_input(block.input),
+                        })
+                    elif isinstance(block, ToolResultBlock):
+                        _log_event(node, phase_label, {
+                            "type": "tool_result",
+                            "tool_use_id": block.tool_use_id,
+                            "is_error": block.is_error,
+                            "content_length": len(str(block.content)),
+                        })
+                    elif isinstance(block, TextBlock):
                         last_text = block.text
+                        _log_event(node, phase_label, {
+                            "type": "text",
+                            "length": len(block.text),
+                            "preview": block.text[:200],
+                        })
             elif isinstance(message, ResultMessage):
                 cost = message.total_cost_usd or 0.0
                 usage = message.usage or {}
                 input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
+                _log_event(node, phase_label, {
+                    "type": "result",
+                    "cost_usd": cost,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "duration_ms": getattr(message, "duration_ms", None),
+                    "num_turns": getattr(message, "num_turns", None),
+                })
+            elif isinstance(message, SystemMessage):
+                _log_event(node, phase_label, {
+                    "type": "system",
+                    "subtype": message.subtype,
+                })
     finally:
         if saved_claudecode is not None:
             os.environ["CLAUDECODE"] = saved_claudecode
@@ -172,6 +234,8 @@ async def rlm_call(
         model=config.model,
         tools=tools,
         permission_mode=config.permission_mode,
+        node=node,
+        phase_label="decompose",
     )
     total_cost += phase.cost_usd
 
@@ -191,6 +255,7 @@ async def rlm_call(
             workspace_root=workspace.root,
             total_cost_usd=total_cost,
             total_calls=total_calls,
+            output_files=node.discover_output_files(),
         )
 
     # Check: did the agent request subcalls? (Issue 5: validated by read_subcalls)
@@ -254,6 +319,8 @@ async def rlm_call(
         model=config.model,
         tools=tools,
         permission_mode=config.permission_mode,
+        node=node,
+        phase_label="synthesize",
     )
     total_cost += synth_phase.cost_usd
     total_calls += 1
@@ -278,4 +345,5 @@ async def rlm_call(
         workspace_root=workspace.root,
         total_cost_usd=total_cost,
         total_calls=total_calls,
+        output_files=node.collect_all_output_files(),
     )

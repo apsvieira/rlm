@@ -74,6 +74,15 @@ def cli(
     click.echo(f"Workspace: {result.workspace_root}")
     click.echo(f"Total API calls: {result.total_calls}")
     click.echo(f"Total cost: ${result.total_cost_usd:.4f}")
+    if result.output_files:
+        click.echo(f"\nOutput files ({len(result.output_files)}):")
+        for f in result.output_files:
+            size = f.stat().st_size if f.exists() else 0
+            if size >= 1024:
+                size_str = f"({size / 1024:.1f}KB)"
+            else:
+                size_str = f"({size}B)"
+            click.echo(f"  {f}  {size_str}")
     click.echo(f"{'='*60}\n")
     click.echo(result.answer)
 
