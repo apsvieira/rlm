@@ -149,6 +149,67 @@ class TestNodeError:
         assert "completed_at" in status
 
 
+class TestEventLog:
+    def test_append_event_creates_file(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.append_event({"type": "tool_use", "name": "Read"})
+        assert node.events_path.exists()
+        lines = node.events_path.read_text().strip().split("\n")
+        assert len(lines) == 1
+        event = json.loads(lines[0])
+        assert event["type"] == "tool_use"
+        assert event["name"] == "Read"
+        assert "ts" in event
+
+    def test_append_event_multiple(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.append_event({"type": "tool_use", "name": "Read"})
+        node.append_event({"type": "tool_result", "is_error": False, "content_length": 100})
+        node.append_event({"type": "text", "length": 50, "preview": "hello"})
+        lines = node.events_path.read_text().strip().split("\n")
+        assert len(lines) == 3
+
+    def test_append_event_preserves_custom_ts(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.append_event({"type": "text", "ts": "2026-01-01T00:00:00Z"})
+        event = json.loads(node.events_path.read_text().strip())
+        assert event["ts"] == "2026-01-01T00:00:00Z"
+
+    def test_read_events(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.append_event({"type": "tool_use", "name": "Read"})
+        node.append_event({"type": "result", "cost_usd": 0.005})
+        events = node.read_events()
+        assert len(events) == 2
+        assert events[0]["type"] == "tool_use"
+        assert events[1]["cost_usd"] == 0.005
+
+    def test_read_events_empty(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        assert node.read_events() == []
+
+    def test_read_events_handles_malformed_lines(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.events_path.write_text('{"type":"tool_use"}\nnot valid json\n{"type":"text"}\n')
+        events = node.read_events()
+        assert len(events) == 2
+        assert events[0]["type"] == "tool_use"
+        assert events[1]["type"] == "text"
+
+    def test_append_event_with_phase(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        node.append_event({"type": "tool_use", "name": "Glob", "phase": "decompose"})
+        event = json.loads(node.events_path.read_text().strip())
+        assert event["phase"] == "decompose"
+
+
 class TestRunManifest:
     def test_write_run_manifest(self, tmp_path: Path):
         ws = Workspace(root=tmp_path / "rlm_ws")
@@ -175,3 +236,60 @@ class TestRunManifest:
         assert manifest["total_cost_usd"] == 0.05
         assert manifest["total_calls"] == 3
         assert "completed_at" in manifest
+
+
+class TestDiscoverOutputFiles:
+    def test_excludes_framework_files(self, tmp_path: Path):
+        from rlm.workspace import FRAMEWORK_FILES
+
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        # Create framework files
+        for name in FRAMEWORK_FILES:
+            (node.path / name).write_text("framework")
+        # Create output files
+        (node.path / "report.md").write_text("analysis")
+        (node.path / "data.json").write_text("{}")
+        result = node.discover_output_files()
+        names = [p.name for p in result]
+        assert "report.md" in names
+        assert "data.json" in names
+        for fw in FRAMEWORK_FILES:
+            assert fw not in names
+
+    def test_returns_absolute_paths(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        (node.path / "output.txt").write_text("data")
+        result = node.discover_output_files()
+        assert len(result) == 1
+        assert result[0].is_absolute()
+
+    def test_excludes_directories(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0, context="hello")
+        (node.path / "subdir").mkdir()
+        (node.path / "output.txt").write_text("data")
+        result = node.discover_output_files()
+        names = [p.name for p in result]
+        assert "subdir" not in names
+        assert "vars" not in names
+        assert "output.txt" in names
+
+    def test_empty_workspace(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        node = ws.create_node(depth=0, call_index=0)
+        # Only framework files (vars/ dir) exist
+        result = node.discover_output_files()
+        assert result == []
+
+    def test_collect_all_includes_child_nodes(self, tmp_path: Path):
+        ws = Workspace(root=tmp_path / "rlm_ws")
+        parent = ws.create_node(depth=0, call_index=0, context="parent")
+        child = ws.create_node(depth=1, call_index=0, context="child", parent=parent)
+        (parent.path / "parent_report.md").write_text("parent data")
+        (child.path / "child_report.md").write_text("child data")
+        result = parent.collect_all_output_files()
+        names = [p.name for p in result]
+        assert "parent_report.md" in names
+        assert "child_report.md" in names

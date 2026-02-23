@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 
 
+FRAMEWORK_FILES = {"answer.txt", "context.txt", "subcalls.json", "status.json", "events.jsonl", "error.txt"}
+
+
 @dataclass
 class WorkspaceNode:
     """A single agent's workspace directory."""
@@ -60,6 +63,32 @@ class WorkspaceNode:
         self.status_path.write_text(json.dumps(existing, indent=2))
 
     @property
+    def events_path(self) -> Path:
+        return self.path / "events.jsonl"
+
+    def append_event(self, event: dict[str, Any]) -> None:
+        """Append a timestamped event to events.jsonl."""
+        from datetime import datetime, timezone
+
+        event.setdefault("ts", datetime.now(timezone.utc).isoformat())
+        with self.events_path.open("a") as f:
+            f.write(json.dumps(event) + "\n")
+
+    def read_events(self) -> list[dict[str, Any]]:
+        """Read all events from events.jsonl."""
+        if not self.events_path.exists():
+            return []
+        events = []
+        for line in self.events_path.read_text().splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return events
+
+    @property
     def error_path(self) -> Path:
         return self.path / "error.txt"
 
@@ -69,6 +98,31 @@ class WorkspaceNode:
 
         self.error_path.write_text(message)
         self.write_status(state="error", completed_at=datetime.now(timezone.utc).isoformat())
+
+    def discover_output_files(self) -> list[Path]:
+        """Return sorted list of non-framework files in this node's directory.
+
+        Skips directories and known framework files. Non-recursive.
+        """
+        if not self.path.exists():
+            return []
+        files = []
+        for entry in self.path.iterdir():
+            if entry.is_dir():
+                continue
+            if entry.name in FRAMEWORK_FILES:
+                continue
+            files.append(entry.resolve())
+        return sorted(files)
+
+    def collect_all_output_files(self) -> list[Path]:
+        """Collect output files from this node and all child nodes recursively."""
+        files = self.discover_output_files()
+        for child_dir in sorted(self.path.glob("d*_c*")):
+            if child_dir.is_dir():
+                child_node = WorkspaceNode(path=child_dir)
+                files.extend(child_node.collect_all_output_files())
+        return files
 
     def read_subcalls(self) -> list[dict[str, Any]]:
         if not self.subcalls_path.exists():
